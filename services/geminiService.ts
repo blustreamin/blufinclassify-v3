@@ -756,12 +756,37 @@ export const analyzeImageForTransaction = async (
   docId: string
 ): Promise<Partial<Transaction>[] | null> => {
   const ai = getAIClient();
-  if (!ai) return null;
+  if (!ai) {
+    console.warn("Gemini API client not available — no API key set. Image OCR skipped.");
+    return null;
+  }
+
+  // Ensure valid MIME type
+  if (!mimeType || mimeType === 'application/octet-stream') {
+    mimeType = 'image/jpeg';
+  }
 
   try {
      
-    // Using a simpler prompt for image analysis than the massive one above
-    const prompt = `Analyze this financial document image and extract transactions. Return JSON.`;
+    const prompt = `You are a financial document OCR specialist. Analyze this bank/credit card statement image carefully.
+
+INSTRUMENT CONTEXT: ${instrumentId}
+${instrumentId.includes('lazypay') ? 'This is a LazyPay BNPL statement. Extract each purchase transaction with date, merchant name, and amount.' : ''}
+${instrumentId.includes('simpl') ? 'This is a Simpl BNPL statement. Extract each purchase transaction with date, merchant name, and amount.' : ''}
+${instrumentId.includes('rbl') ? 'This is an RBL Bank credit card statement. Extract each transaction with date, description, and amount. Debits are purchases, credits are payments/reversals.' : ''}
+${instrumentId.includes('tata') || instrumentId.includes('sbi') ? 'This is an SBI Tata credit card statement. Extract each transaction with date, description, and amount.' : ''}
+
+RULES:
+1. Extract EVERY transaction row visible in the image
+2. Dates must be in YYYY-MM-DD format (convert from DD/MM/YYYY or DD-MMM-YYYY etc.)
+3. Amount must be a positive number (use direction field for debit/credit)
+4. For BNPL: all purchases are DEBIT, payments/settlements are CREDIT
+5. Skip header rows, totals, summary rows, opening/closing balance rows
+6. If a date is unclear, use null
+7. Description should be the merchant/payee name, cleaned of noise
+
+Return structured JSON with all transactions found.`;
+
     const responseSchema = {
       type: Type.OBJECT,
       properties: {
@@ -791,7 +816,15 @@ export const analyzeImageForTransaction = async (
 
     const response = await ai.models.generateContent({
       model: GEMINI_MODEL,
-      contents: { parts: [{ inlineData: { mimeType, data: base64Data } }, { text: prompt }] },
+      contents: [
+        {
+          role: 'user',
+          parts: [
+            { inlineData: { mimeType, data: base64Data } },
+            { text: prompt }
+          ]
+        }
+      ],
       config: { responseMimeType: "application/json", responseSchema: responseSchema },
     });
 

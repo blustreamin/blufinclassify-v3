@@ -612,17 +612,32 @@ const parseGenericImageOcrV1 = async (file: File, instrumentId: string, options?
 const parseGeminiVisionV1 = async (file: File, instrumentId: string): Promise<ParsedResult> => {
     // Convert file to Base64
     const base64 = await fileToBase64(file);
-    const docId = generateId(); // Temporary ID for this parse session
+    
+    // Determine MIME type robustly (browser may not set file.type for zip-extracted files)
+    let mimeType = file.type;
+    if (!mimeType) {
+        const ext = file.name.split('.').pop()?.toLowerCase();
+        const mimeMap: Record<string, string> = {
+            'jpg': 'image/jpeg', 'jpeg': 'image/jpeg', 'png': 'image/png',
+            'gif': 'image/gif', 'webp': 'image/webp', 'pdf': 'application/pdf'
+        };
+        mimeType = mimeMap[ext || ''] || 'image/jpeg';
+    }
+
+    const docId = generateId();
     
     // Call Gemini Service
-    const partialTxns = await analyzeImageForTransaction(base64, file.type, instrumentId, docId);
+    const partialTxns = await analyzeImageForTransaction(base64, mimeType, instrumentId, docId);
     
     if (!partialTxns) {
+        // Check if it's an API key issue
+        const { getGeminiApiKey } = await import('./geminiService');
+        const hasKey = !!getGeminiApiKey();
         return {
             docMeta: { extractedInstitutionName: null },
             txns: [],
-            warnings: ['GEMINI_API_FAIL'],
-            parseReport: createReport('GEMINI_AI', 'VisionFailure', 0)
+            warnings: [hasKey ? 'GEMINI_API_CALL_FAILED' : 'NO_GEMINI_API_KEY — Set your API key in Settings to process image files'],
+            parseReport: createReport('GEMINI_AI', hasKey ? 'VisionCallFailed' : 'NoApiKey', 0)
         };
     }
 

@@ -60,6 +60,7 @@ const Home: React.FC = () => {
     let processed = 0;
     let failed = 0;
     let skipped = 0;
+    let needsApiKey = false;
 
     for (const file of arr) {
       try {
@@ -125,7 +126,17 @@ const Home: React.FC = () => {
 
         // Dispatch results
         dispatch({ type: 'PARSE/SUCCESS', payload: { jobId, docId, extracted: result } });
-        processed++;
+        
+        // Track warnings for image files with no results (likely API key issue)
+        if (result.txns.length === 0 && fileType === 'IMAGE') {
+          const noKeyWarning = result.warnings?.some(w => w.includes('NO_GEMINI_API_KEY'));
+          if (noKeyWarning) {
+            needsApiKey = true;
+          }
+          failed++;
+        } else {
+          processed++;
+        }
 
         setUploadMsg(`Processed ${processed}/${arr.length}...`);
       } catch (e) {
@@ -140,6 +151,7 @@ const Home: React.FC = () => {
     if (processed > 0) parts.push(`${processed} ingested`);
     if (failed > 0) parts.push(`${failed} failed`);
     if (skipped > 0) parts.push(`${skipped} skipped`);
+    if (needsApiKey) parts.push('⚠️ Image files need Gemini API key (Settings → General)');
     setUploadMsg(parts.join(', ') || 'No files processed');
     setTimeout(() => setUploadMsg(''), 6000);
   };
