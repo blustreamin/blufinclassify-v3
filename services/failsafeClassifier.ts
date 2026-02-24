@@ -109,7 +109,8 @@ const IT_VENDORS = [
 
 // --- TELCO ---
 const TELCO_VENDORS = [
-    'VODAFONE', 'VI ', 'IDEA', 'JIO', 'JIOPOSTPA', 'JIOMOBILI',
+    'VODAFONE', 'VI POSTPAID', 'VI PREPAID', 'VI MOBILE',
+    'IDEA', 'JIO', 'JIOPOSTPA', 'JIOMOBILI',
     'AIRTEL', 'BROADBAND', 'ACT FIBERNET', 'BSNL', 'DREAMPLUG', 'CRED.TELECOM',
 ];
 
@@ -124,7 +125,7 @@ const FUEL_VENDOR_ALIASES = ['SHIVAISH', 'MEENA BALA']; // Misleading names — 
 const FUEL_KEYWORDS = ['PETROL', 'DIESEL', 'FUEL', 'FILLING', 'FILLUP'];
 
 // --- VEHICLE SERVICE (with ICD exception) ---
-const VEHICLE_SERVICE_REIMBURSABLE = ['SELVARAJ', 'SELVASX', 'GODSPEED', 'GOD SPEED', 'BALAJI MOTOR', 'AIE CAR', 'MARUTI', 'SUZUKI', 'NEXA', 'GOMECHANIC', 'GOWTHAMAN', 'THEJAMEDIASAND', 'URBANCOMP', 'URBAN COMPANY'];
+const VEHICLE_SERVICE_REIMBURSABLE = ['SELVARAJ', 'SELVASX', 'GODSPEED', 'GOD SPEED', 'BALAJI MOTOR', 'AIE CAR', 'MARUTI', 'SUZUKI', 'NEXA', 'GOMECHANIC', 'GOWTHAMAN', 'THEJAMEDIASAND'];
 const VEHICLE_SERVICE_PERSONAL = ['ICD TUNING', 'ICD AUTO']; // NOT reimbursable
 const VEHICLE_KEYWORDS = ['CAR REPAIR', 'CAR SERVICE', 'INNOVA', 'SCROSS', 'S-CROSS', 'S CROSS', 'TYRE', 'TIRE', 'WINDSHIELD', 'DENT', 'BODY SHOP', 'SERVICING'];
 
@@ -133,7 +134,8 @@ const BNPL_REPAYMENT_PATTERNS = ['LAZYPAY', 'LAZYPAYREPAYME', 'RAZORPAYSOFTWAREP
 
 // --- BANK / TRANSFERS ---
 const BANK_CHARGE_TOKENS = ['CHARGE', 'BANK CHARGES', 'LATE FEE', 'PENALTY', 'ECS RETURN', 'INSUFF', 'GST @', 'NEFT RETURN', 'BOUNCE', 'ANNUAL FEE'];
-const OD_INTEREST_TOKENS = ['INT.COLL', 'INTEREST COLL', 'OD INTEREST'];
+const OD_INTEREST_TOKENS = ['INT.COLL', 'INTEREST COLL', 'OD INTEREST', 'SB::INT.PD'];
+const OD_TRANSFER_TOKENS = ['BLUSTREAMMARKETINGS', 'BLUSTREAM MARKETING', 'BLUSTREAMMARKET'];
 const GST_PAYMENT_TOKENS = ['TAXOLOGISTS', 'GST PAYMENT', 'GST PAY'];
 const RENT_TOKENS = ['PETALSRENT', 'PETALS RENT', 'RENT MAINTENANC'];
 const ELECTRICITY_TOKENS = ['ELECTRICITY', 'TNEB', 'TAMIL NADU/ELECTRICITY', 'TAMILNADU'];
@@ -144,6 +146,10 @@ const FACEBOOK_ADS = ['FACEBOOK', 'WWW FACEBOOK COM', 'META ADS'];
 const GOOGLE_ADS = ['GOOGLE ADS'];
 const UBER_TOKENS = ['UBER', 'UBERINDIA', 'UBERRIDE'];
 const TRAVEL_TOKENS = ['MAKEMYTRIP', 'MAKE MY TRIP', 'REDBUS', 'NUEGO', 'MOVEINN', 'ANJALI TOUR', 'IRCTC'];
+// --- OFFICE MISC ---
+const OFFICE_REPAIR_TOKENS = ['URBANCOMP', 'URBAN COMPANY', 'URBAN CLAP', 'PLUMBER', 'ELECTRICIAN', 'AC SERVICE', 'AC REPAIR'];
+const ADVANCE_SALARY_TOKENS_SB = ['HRIDAM', 'RIYA', 'JOSHUA', 'NAYAN', 'MAHIKA', 'SABARI', 'KARTHI', 'NARMADA', 'GOPIKA', 'NIKHIL', 'TALIB', 'SHUBASHINI', 'YOGALAKSHMI', 'MUKTI', 'MUKTIKANTA'];
+const OFFICE_SUPPLY_TOKENS = ['AMAZON', 'FLIPKART', 'PEPPERFRY', 'IKEA', 'DECATHLON', 'CROMA', 'RELIANCE DIGITAL'];
 
 // ════════════════════════════════════════════════════════════════
 // HELPERS
@@ -405,6 +411,25 @@ export const runFailsafeClassification = (
             }
         }
 
+        // ─── STEP 6b: OFFICE REPAIR (Urban Company, plumber etc.) ───
+        if (!classified) {
+            const officeRepair = containsAny(text, OFFICE_REPAIR_TOKENS);
+            if (officeRepair) {
+                categoryCode = 'OFFICE_REPAIR';
+                scope = 'Company';
+                entityName = officeRepair;
+                entityType = 'CompanyVendor';
+                reimbursable = isPersonal;
+                confidence = 0.80;
+                reason = `Office Repair: ${officeRepair}`;
+                if (isPersonal) {
+                    scopeOverrideReason = 'Office repair from personal';
+                    flags.push('PERSONAL_PAID_FOR_COMPANY');
+                }
+                emit(); classified = true;
+            }
+        }
+
         // ─── STEP 7+8: ENTITY MATCHING + CATEGORY LOGIC ───
         if (!classified) {
             // 7.1 Alias Map
@@ -543,6 +568,16 @@ export const runFailsafeClassification = (
                 }
             }
 
+            // 8.5b OD Transfer from personal SB to company CA (BLUSTREAMMARKETINGS)
+            else if (containsAny(text, OD_TRANSFER_TOKENS) && isPersonal && txn.direction === 'DEBIT') {
+                categoryCode = 'BANK_INTEREST_OD';
+                scope = 'Company'; reimbursable = true;
+                confidence += 0.40;
+                reason = 'OD interest transfer: personal SB → company CA';
+                scopeOverrideReason = 'Blustream OD interest from personal SB';
+                flags.push('PERSONAL_PAID_FOR_COMPANY', 'OD_TRANSFER');
+            }
+
             // 8.6 Bank Charges
             else if (containsAny(text, BANK_CHARGE_TOKENS)) {
                 categoryCode = 'BANK_CHARGES';
@@ -593,10 +628,10 @@ export const runFailsafeClassification = (
             }
 
             // 8.12 Telco (with scope override)
-            else if (containsAny(text, TELCO_VENDORS)) {
+            else if (containsAny(text, TELCO_VENDORS) || (text === 'VI' && txn.amount < 1000)) {
                 categoryCode = 'TELCO_INTERNET';
                 confidence += 0.40;
-                reason = `Telco: ${containsAny(text, TELCO_VENDORS)}`;
+                reason = `Telco: ${containsAny(text, TELCO_VENDORS) || 'VI'}`;
                 if (isPersonal) {
                     scope = 'Company'; reimbursable = true;
                     scopeOverrideReason = 'Telecom from personal';

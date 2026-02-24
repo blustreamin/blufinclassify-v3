@@ -88,8 +88,12 @@ const reducer = (state: AppState, action: Action): AppState => {
   }
 
   switch (action.type) {
-    case 'APP/HYDRATE_SUCCESS':
-        return { ...action.payload.state, meta: { ...action.payload.state.meta, hydrateStatus: 'ready' } };
+    case 'APP/HYDRATE_SUCCESS': {
+        const hydrated = { ...action.payload.state, meta: { ...action.payload.state.meta, hydrateStatus: 'ready' } };
+        hydrated.ledger = hydrated.ledger || {};
+        hydrated.ledger.registries = buildRegistries(hydrated);
+        return hydrated;
+    }
     
     case 'APP/HYDRATE_ERROR':
         newState.meta.hydrateStatus = 'error';
@@ -239,6 +243,10 @@ const reducer = (state: AppState, action: Action): AppState => {
         }
         
         newState.ledger.lastComputedAt = Date.now();
+        
+        // Build registries so Core Intelligence works without visiting Overview first
+        newState.ledger.registries = buildRegistries(newState);
+        
         return newState;
     }
     case 'PARSE/FAIL': {

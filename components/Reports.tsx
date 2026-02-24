@@ -4,14 +4,39 @@ import { useStore } from '../store/store';
 import { runAnalysis, isAnalyticsReady } from '../services/analysis';
 import { getEffectiveTransaction } from '../services/utils';
 import { Transaction } from '../types';
-import { ChevronLeft, ChevronRight, Download, TrendingUp, TrendingDown, Wallet, DollarSign, ArrowLeftRight, ReceiptText } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Download, TrendingUp, TrendingDown, Wallet, DollarSign, ArrowLeftRight, ReceiptText, Calendar } from 'lucide-react';
 import { exportLedgerToCsv } from '../services/export';
 
 type ReportTab = 'pnl' | 'expenses' | 'revenue' | 'reimbursements' | 'director';
+type PeriodMode = 'month' | 'fy_ytd';
+
+// Get FY months: April of start year through March of next year (or current month)
+const getFYMonths = (month: string): string[] => {
+  const [y, m] = month.split('-').map(Number);
+  // FY starts April: if month >= April, FY is current year; else FY started prev year
+  const fyStartYear = m >= 4 ? y : y - 1;
+  const months: string[] = [];
+  for (let yr = fyStartYear, mo = 4; ; ) {
+    const key = `${yr}-${String(mo).padStart(2, '0')}`;
+    months.push(key);
+    if (key === month) break;
+    mo++;
+    if (mo > 12) { mo = 1; yr++; }
+    if (months.length > 12) break; // safety
+  }
+  return months;
+};
+
+const getFYLabel = (month: string): string => {
+  const [y, m] = month.split('-').map(Number);
+  const fyStart = m >= 4 ? y : y - 1;
+  return `FY ${fyStart}-${String(fyStart + 1).slice(2)}`;
+};
 
 const Reports: React.FC = () => {
   const { state, dispatch } = useStore();
   const [tab, setTab] = useState<ReportTab>('pnl');
+  const [periodMode, setPeriodMode] = useState<PeriodMode>('month');
   const month = state.context.selectedMonth;
   const filter = state.ui.ledgerView.filter;
 
@@ -25,21 +50,28 @@ const Reports: React.FC = () => {
     dispatch({ type: 'CONTEXT/SET_MONTH', payload: { month: d.toISOString().slice(0, 7) } });
   };
 
-  // Get categorized transaction subsets
-  const monthTxns = useMemo(() => {
-    const ids = state.transactions.byMonth[month] || [];
-    return ids.map(id => {
+  // Get transactions for selected period (month OR FY YTD)
+  const periodTxns = useMemo(() => {
+    const months = periodMode === 'fy_ytd' ? getFYMonths(month) : [month];
+    const allIds: string[] = [];
+    months.forEach(m => {
+      const ids = state.transactions.byMonth[m] || [];
+      allIds.push(...ids);
+    });
+    return allIds.map(id => {
       const t = state.transactions.byId[id];
       return t ? getEffectiveTransaction(t) : null;
     }).filter(Boolean) as Transaction[];
-  }, [state.transactions, month]);
+  }, [state.transactions, month, periodMode]);
 
-  const analyticsReady = useMemo(() => monthTxns.filter(t => isAnalyticsReady(t, { includeDrafts: filter.includeDraftsInAnalytics })), [monthTxns, filter]);
+  const analyticsReady = useMemo(() => periodTxns.filter(t => isAnalyticsReady(t, { includeDrafts: filter.includeDraftsInAnalytics })), [periodTxns, filter]);
 
   const companyExpenses = analyticsReady.filter(t => t.scope === 'Company' && t.direction === 'DEBIT' && !['COMPANY_TRANSFER', 'CC_BILL_PAYMENT', 'BNPL_SETTLEMENT', 'INTERNAL_ADJUSTMENT'].includes(t.categoryCode || ''));
   const companyRevenue = analyticsReady.filter(t => t.scope === 'Company' && t.direction === 'CREDIT');
-  const reimbursables = monthTxns.filter(t => t.reimbursable);
+  const reimbursables = periodTxns.filter(t => t.reimbursable);
   const directorTxns = analyticsReady.filter(t => t.classificationFlags?.includes('MANAGEMENT_OVERHEAD') || t.entityType === 'ManagementOverhead' || t.categoryCode?.startsWith('DIRECTOR'));
+
+  const periodLabel = periodMode === 'fy_ytd' ? `${getFYLabel(month)} YTD` : month;
 
   // Group by category
   const groupByCategory = (txns: Transaction[]) => {
@@ -68,9 +100,15 @@ const Reports: React.FC = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-bold text-slate-900">Reports</h1>
         <div className="flex items-center gap-3">
+          {/* Period Toggle */}
+          <div className="flex items-center bg-white border border-slate-200 rounded-lg px-1 py-1 shadow-sm">
+            <button onClick={() => setPeriodMode('month')} className={`px-3 py-1 rounded text-xs font-bold transition-all ${periodMode === 'month' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-700'}`}>Month</button>
+            <button onClick={() => setPeriodMode('fy_ytd')} className={`px-3 py-1 rounded text-xs font-bold transition-all ${periodMode === 'fy_ytd' ? 'bg-blue-600 text-white' : 'text-slate-500 hover:text-slate-700'}`}>FY YTD</button>
+          </div>
+          {/* Month Selector */}
           <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-lg px-1 py-1 shadow-sm">
             <button onClick={() => changeMonth(-1)} className="p-1.5 hover:bg-slate-100 rounded text-slate-400"><ChevronLeft size={16}/></button>
-            <span className="font-mono text-sm font-bold text-slate-700 px-2 min-w-[90px] text-center">{month}</span>
+            <span className="font-mono text-sm font-bold text-slate-700 px-2 min-w-[90px] text-center">{periodLabel}</span>
             <button onClick={() => changeMonth(1)} className="p-1.5 hover:bg-slate-100 rounded text-slate-400"><ChevronRight size={16}/></button>
           </div>
         </div>
@@ -96,7 +134,7 @@ const Reports: React.FC = () => {
       </div>
 
       {/* Tab Content */}
-      {tab === 'pnl' && <PnLView report={report} fmt={fmt} month={month} />}
+      {tab === 'pnl' && <PnLView companyExpenses={companyExpenses} companyRevenue={companyRevenue} fmt={fmt} periodLabel={periodLabel} />}
       {tab === 'expenses' && <CategoryView title="Company Expenses" txns={companyExpenses} groups={groupByCategory(companyExpenses)} fmt={fmt} />}
       {tab === 'revenue' && <CategoryView title="Company Revenue" txns={companyRevenue} groups={groupByCategory(companyRevenue)} fmt={fmt} isCredit />}
       {tab === 'reimbursements' && <ReimbursementView txns={reimbursables} groups={groupByCategory(reimbursables)} fmt={fmt} />}
@@ -106,21 +144,32 @@ const Reports: React.FC = () => {
 };
 
 // ─── P&L View ───
-const PnLView: React.FC<{ report: any; fmt: (v: number) => string; month: string }> = ({ report, fmt, month }) => {
-  const pnl = report.pnl || {};
-  const rev = pnl.revenue || {};
-  const totalRevenue = rev.total || 0;
-  const totalExpense = pnl.totalExpense || 0;
-  const netProfit = pnl.netProfit || 0;
-  const expenses = pnl.expenses || {};
-  const marginPct = report.coreHealth?.operatingMarginPercent || 0;
+const PnLView: React.FC<{ companyExpenses: Transaction[]; companyRevenue: Transaction[]; fmt: (v: number) => string; periodLabel: string }> = ({ companyExpenses, companyRevenue, fmt, periodLabel }) => {
+  const totalRevenue = companyRevenue.reduce((s, t) => s + t.amount, 0);
+  const totalExpense = companyExpenses.reduce((s, t) => s + t.amount, 0);
+  const netProfit = totalRevenue - totalExpense;
+  const marginPct = totalRevenue > 0 ? ((netProfit / totalRevenue) * 100).toFixed(1) : '0';
+
+  // Expense breakdown by category
+  const expenseGroups: Record<string, number> = {};
+  companyExpenses.forEach(t => {
+    const cat = t.categoryCode || 'UNCATEGORIZED';
+    expenseGroups[cat] = (expenseGroups[cat] || 0) + t.amount;
+  });
+
+  // KPI: MCO SaaS, IT Infra, Bank Charges, Unclassified %
+  const mcoSaas = companyExpenses.filter(t => ['MCO', 'SAAS_SUBSCRIPTION'].includes(t.categoryCode || '')).reduce((s, t) => s + t.amount, 0);
+  const itInfra = companyExpenses.filter(t => ['IT_INFRA', 'IT'].includes(t.categoryCode || '')).reduce((s, t) => s + t.amount, 0);
+  const bankCharges = companyExpenses.filter(t => ['BANK_CHARGES', 'CC_CHARGES'].includes(t.categoryCode || '')).reduce((s, t) => s + t.amount, 0);
+  const unclassified = companyExpenses.filter(t => !t.categoryCode || t.categoryCode === 'UNCATEGORIZED').reduce((s, t) => s + t.amount, 0);
+  const unclassifiedPct = totalExpense > 0 ? ((unclassified / totalExpense) * 100).toFixed(1) : '0';
 
   return (
   <div className="space-y-6">
     {/* Summary Cards */}
     <div className="grid grid-cols-3 gap-4">
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
-        <div className="text-xs text-slate-400 font-medium uppercase">Revenue</div>
+        <div className="text-xs text-slate-400 font-medium uppercase">Revenue ({periodLabel})</div>
         <div className="text-2xl font-bold text-green-600 mt-1">{fmt(totalRevenue)}</div>
       </div>
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
@@ -140,7 +189,7 @@ const PnLView: React.FC<{ report: any; fmt: (v: number) => string; month: string
         <h3 className="text-sm font-bold text-slate-700">Expense Breakdown</h3>
       </div>
       <div className="divide-y divide-slate-50">
-        {Object.entries(expenses).filter(([,v]: any) => v > 0).sort((a: any, b: any) => b[1] - a[1]).map(([group, amount]: any) => (
+        {Object.entries(expenseGroups).filter(([,v]) => v > 0).sort((a, b) => b[1] - a[1]).map(([group, amount]) => (
           <div key={group} className="px-5 py-3 flex items-center justify-between text-sm">
             <span className="text-slate-600">{group.replace(/_/g, ' ')}</span>
             <span className="font-mono font-medium text-slate-800">{fmt(amount)}</span>
@@ -151,10 +200,10 @@ const PnLView: React.FC<{ report: any; fmt: (v: number) => string; month: string
 
     {/* KPIs */}
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <KPI label="MCO SaaS" value={fmt(report.toolsSubscriptions?.mcoSaasSpend || 0)} />
-      <KPI label="IT Infra" value={fmt(report.toolsSubscriptions?.itInfraSpend || 0)} />
-      <KPI label="Bank Charges" value={fmt(report.controlLeakage?.bankChargesTotal || 0)} color="text-red-600" />
-      <KPI label="Unclassified" value={`${report.controlLeakage?.unclassifiedSpendPercent || 0}%`} color={(report.controlLeakage?.unclassifiedSpendPercent || 0) > 5 ? 'text-red-600' : 'text-slate-700'} />
+      <KPI label="MCO SaaS" value={fmt(mcoSaas)} />
+      <KPI label="IT Infra" value={fmt(itInfra)} />
+      <KPI label="Bank Charges" value={fmt(bankCharges)} color="text-red-600" />
+      <KPI label="Unclassified" value={`${unclassifiedPct}%`} color={parseFloat(unclassifiedPct) > 5 ? 'text-red-600' : 'text-slate-700'} />
     </div>
   </div>
   );
