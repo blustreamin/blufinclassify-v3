@@ -6,7 +6,7 @@ import { generateId } from '../services/utils';
 import { parseFileUniversal } from '../services/parsers';
 import { IDBService } from '../services/idb';
 import { detectInstrument } from '../services/mapping';
-import { Document } from '../types';
+import { Document, ParsedResult } from '../types';
 import { 
   Upload, TrendingUp, TrendingDown, Wallet, ArrowRight, Database, 
   BarChart3, ChevronLeft, ChevronRight, Loader2, CheckCircle, 
@@ -38,19 +38,16 @@ const Home: React.FC = () => {
   const handleFiles = async (files: FileList | File[], forceInstrumentId?: string) => {
     const arr = Array.from(files).filter(f => {
       const path = (f as any).webkitRelativePath || '';
-      return !path.toLowerCase().includes('/old/') && !path.toLowerCase().includes(' old');
+      return !path.toLowerCase().includes('/old/') && !path.toLowerCase().includes(' old') && !f.name.startsWith('.') && !f.name.includes('DS_Store');
     });
     if (arr.length === 0) return;
 
     // For single/multiple files without folder paths, try auto-detect first
-    // If it fails for any file, show instrument picker
     if (!forceInstrumentId) {
       const hasFolder = arr.some(f => (f as any).webkitRelativePath);
       if (!hasFolder) {
-        // Try auto-detect on first file
         const testId = detectInstrument(arr[0], '', state.registry.instruments);
         if (!testId) {
-          // Can't auto-detect — ask user to pick instrument
           setPendingFiles(arr);
           setShowInstrumentPicker(true);
           return;
@@ -62,46 +59,115 @@ const Home: React.FC = () => {
     setUploadMsg(`Processing ${arr.length} file${arr.length > 1 ? 's' : ''}...`);
     let processed = 0;
     let failed = 0;
+    let skipped = 0;
 
     for (const file of arr) {
       try {
         const relativePath = (file as any).webkitRelativePath || '';
         const instrumentId = forceInstrumentId || detectInstrument(file, relativePath, state.registry.instruments);
-        if (!instrumentId) { failed++; continue; }
+        if (!instrumentId) { skipped++; continue; }
 
-        const inst = state.registry.instruments[instrumentId];
-        const fileType = file.name.split('.').pop()?.toUpperCase() || 'UNKNOWN';
+        // Determine file type
+        const ext = file.name.split('.').pop()?.toUpperCase() || '';
+        let fileType: Document['fileType'];
+        if (ext === 'CSV') fileType = 'CSV';
+        else if (ext === 'XLS') fileType = 'XLS';
+        else if (ext === 'XLSX') fileType = 'XLSX';
+        else if (ext === 'PDF') fileType = 'PDF';
+        else if (['JPG', 'JPEG', 'PNG', 'GIF', 'WEBP'].includes(ext)) fileType = 'IMAGE';
+        else { skipped++; continue; }
+
+        // Hash for dedup
         const arrayBuf = await file.arrayBuffer();
-        const hash = await (async () => {
-          const hashBuf = await crypto.subtle.digest('SHA-256', arrayBuf);
-          return Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
-        })();
+        const hashBuf = await crypto.subtle.digest('SHA-256', arrayBuf);
+        const sha256 = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
 
-        // Check duplicate
-        if (state.documents.allIds.some(id => state.documents.byId[id]?.hash === hash)) continue;
+        // Check duplicate by hash
+        const isDup = state.documents.allIds.some(id => state.documents.byId[id]?.storage?.sha256 === sha256);
+        if (isDup) { skipped++; continue; }
 
-        const result = await parseFileUniversal(file, inst);
-        if (!result.transactions.length) { failed++; continue; }
+        // Extract month hint from filename
+        const monthHint = extractMonthHint(file.name);
 
+        // Create document
+        const docId = generateId();
         const doc: Document = {
-          id: generateId(), fileName: file.name, fileType: fileType as any,
-          instrumentId, hash, uploadedAt: new Date().toISOString(),
-          status: 'parsed', parseReport: result.parseReport,
-          transactionCount: result.transactions.length, rawSize: file.size,
+          id: docId,
+          instrumentId,
+          fileName: file.name,
+          relativePath: relativePath || undefined,
+          fileType,
+          sizeBytes: file.size,
+          storage: { blobRef: docId, sha256 },
+          uploadedAt: Date.now(),
+          statementMonthHint: monthHint,
+          extractedInstitutionName: null,
+          parseStatus: 'partial',
+          parseError: null,
+          archivedAt: null,
+          replacedByDocId: null,
         };
-        await IDBService.storeBlob(doc.id, new Uint8Array(arrayBuf));
-        dispatch({ type: 'DOC/ADD', payload: { document: doc, transactions: result.transactions.map(t => ({ ...t, instrumentId, sourceDocumentId: doc.id })) } });
+
+        // Store blob
+        await IDBService.saveFile(docId, file);
+        
+        // Register doc
+        dispatch({ type: 'DOC/UPLOAD_SUCCESS', payload: { doc } });
+
+        // Parse
+        const jobId = generateId();
+        dispatch({ type: 'PARSE/START', payload: { jobId, docId } });
+        
+        const result: ParsedResult = await parseFileUniversal(file, fileType, instrumentId);
+        
+        // Store raw parse data
+        await IDBService.saveParsedData(docId, result);
+
+        // Dispatch results
+        dispatch({ type: 'PARSE/SUCCESS', payload: { jobId, docId, extracted: result } });
         processed++;
+
+        setUploadMsg(`Processed ${processed}/${arr.length}...`);
       } catch (e) {
-        console.error('Upload error:', e);
+        console.error('Upload error for', file.name, e);
         failed++;
       }
     }
 
     setUploading(false);
     setLastUploadCount(processed);
-    setUploadMsg(processed > 0 ? `Done — ${processed} file${processed > 1 ? 's' : ''} ingested${failed > 0 ? `, ${failed} failed` : ''}` : `No new files processed${failed > 0 ? ` (${failed} failed)` : ''}`);
-    setTimeout(() => setUploadMsg(''), 5000);
+    const parts = [];
+    if (processed > 0) parts.push(`${processed} ingested`);
+    if (failed > 0) parts.push(`${failed} failed`);
+    if (skipped > 0) parts.push(`${skipped} skipped`);
+    setUploadMsg(parts.join(', ') || 'No files processed');
+    setTimeout(() => setUploadMsg(''), 6000);
+  };
+
+  // Extract month hint from filename like "April_25" or "JANUARY_2026"
+  const extractMonthHint = (name: string): string | null => {
+    const months: Record<string, string> = { 
+      'january': '01', 'february': '02', 'march': '03', 'april': '04', 
+      'may': '05', 'june': '06', 'july': '07', 'august': '08', 
+      'september': '09', 'october': '10', 'november': '11', 'december': '12',
+      'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04', 
+      'jun': '06', 'jul': '07', 'aug': '08', 'sep': '09', 
+      'oct': '10', 'nov': '11', 'dec': '12'
+    };
+    const lower = name.toLowerCase();
+    for (const [mName, mNum] of Object.entries(months)) {
+      if (lower.includes(mName)) {
+        // Find year
+        const yearMatch = lower.match(/20(\d{2})/);
+        const shortYearMatch = lower.match(/[_\s](\d{2})[_\s.]/);
+        let year = '2025';
+        if (yearMatch) year = `20${yearMatch[1]}`;
+        else if (shortYearMatch) year = `20${shortYearMatch[1]}`;
+        else if (lower.includes('26') || lower.includes('2026')) year = '2026';
+        return `${year}-${mNum}`;
+      }
+    }
+    return null;
   };
 
   const handleInstrumentConfirm = () => {
