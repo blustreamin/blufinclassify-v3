@@ -50,7 +50,7 @@ const createInitialState = (): AppState => {
         lastResult: undefined
     },
     ui: {
-      nav: { currentRoute: "overview" }, 
+      nav: { currentRoute: "home" }, 
       ingestion: { activeInstrumentId: null, uploadModal: { open: false, instrumentId: null }, tileStatus: {} },
       library: { search: "", filter: { month: "2024-03", instrumentId: "ALL", docType: "ALL", parseStatus: "ALL", showArchived: false }, selectedDocId: null },
       ledgerView: { 

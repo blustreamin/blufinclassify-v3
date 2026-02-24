@@ -1,16 +1,21 @@
 
 import React, { ReactNode } from 'react';
 import Layout from './components/Layout';
+import Home from './components/Home';
+import FullLedger from './components/Ledger';
+import Reports from './components/Reports';
+import SettingsPage from './components/SettingsPage';
+import { StoreProvider, useStore } from './store/store';
+
+// Keep old imports for backward compat (deep links, legacy routes)
 import Overview from './components/Overview';
 import Ingestion from './components/Ingestion';
-import FullLedger from './components/Ledger';
 import Library from './components/Library';
 import ParseLab from './components/ParseLab';
 import Registries from './components/Registries';
 import MasterAnalysis from './components/MasterAnalysis';
 import DirectorReconciliation from './components/DirectorReconciliation';
 import { CompanyExpenses, CompanyRevenue, CompanyPnL, DirectorPersonal } from './components/FinancialViews';
-import { StoreProvider, useStore } from './store/store';
 
 interface ErrorBoundaryProps {
   children?: ReactNode;
@@ -53,7 +58,6 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
         </div>
       );
     }
-    // Cast to any to bypass strict property check if React types are not inferring props correctly on subclass
     return (this as any).props.children;
   }
 }
@@ -64,17 +68,19 @@ const AppContent: React.FC = () => {
 
   return (
     <Layout>
-      {tab === 'overview' && <Overview />}
-      {tab === 'ingest' && <Ingestion />}
-      {tab === 'parselab' && <ParseLab />}
-      {tab === 'library' && <Library />}
+      {/* Primary routes */}
+      {(tab === 'home' || tab === 'overview' || tab === 'ingest') && <Home />}
       {tab === 'ledger' && <FullLedger />}
-      {tab === 'registries' && <Registries />}
+      {tab === 'reports' && <Reports />}
+      {(tab === 'settings' || tab === 'registries' || tab === 'library') && <SettingsPage />}
+
+      {/* Legacy routes (still accessible if navigated to directly) */}
+      {tab === 'parselab' && <ParseLab />}
       {tab === 'company_expenses' && <CompanyExpenses />}
       {tab === 'company_revenue' && <CompanyRevenue />}
       {tab === 'director_personal' && <DirectorPersonal />}
       {tab === 'p_n_l' && <CompanyPnL />}
-      {tab === 'master_analysis' && <MasterAnalysis />} 
+      {tab === 'master_analysis' && <MasterAnalysis />}
       {tab === 'reconciliation' && <DirectorReconciliation />}
     </Layout>
   );
@@ -91,3 +97,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+

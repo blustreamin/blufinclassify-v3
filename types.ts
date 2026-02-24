@@ -241,7 +241,7 @@ export interface ParsedResult {
     };
 }
 
-export type AppRoute = 'ledger' | 'overview' | 'master_analysis' | 'company_expenses' | 'company_revenue' | 'director_personal' | 'reconciliation' | 'p_n_l' | 'registries' | 'ingest' | 'library' | 'parselab';
+export type AppRoute = 'home' | 'ledger' | 'reports' | 'settings' | 'overview' | 'master_analysis' | 'company_expenses' | 'company_revenue' | 'director_personal' | 'reconciliation' | 'p_n_l' | 'registries' | 'ingest' | 'library' | 'parselab';
 
 export interface AppState {
     meta: {
