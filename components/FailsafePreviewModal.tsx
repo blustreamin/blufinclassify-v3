@@ -64,8 +64,12 @@ const FailsafePreviewModal: React.FC<FailsafePreviewModalProps> = ({ result, onC
                         categoryCode: s.categoryCode,
                         entityType: s.entityType,
                         entityCanonical: s.entityName || undefined,
-                        notes: `[Failsafe] ${s.reason}`,
-                        markReviewed: false 
+                        notes: `[Failsafe] ${s.reason}${s.flags.length ? ' | Flags: ' + s.flags.join(', ') : ''}`,
+                        markReviewed: false,
+                        reimbursable: s.reimbursable || false,
+                        splitRatio: s.splitRatio || undefined,
+                        classificationFlags: s.flags.length ? s.flags : undefined,
+                        scopeOverrideReason: s.scopeOverrideReason || undefined
                     }
                 });
                 appliedCount++;
@@ -131,8 +135,10 @@ const FailsafePreviewModal: React.FC<FailsafePreviewModalProps> = ({ result, onC
                         )}
                     </div>
 
-                    <div className="text-xs text-slate-500">
-                        Showing {filteredSuggestions.length} rows
+                    <div className="text-xs text-slate-500 flex gap-3">
+                        <span>Showing {filteredSuggestions.length} rows</span>
+                        <span className="text-orange-600 font-medium">{filteredSuggestions.filter(s => s.reimbursable).length} reimbursable</span>
+                        <span className="text-purple-600 font-medium">{filteredSuggestions.filter(s => s.splitRatio).length} BNPL splits</span>
                     </div>
                 </div>
 
@@ -151,18 +157,22 @@ const FailsafePreviewModal: React.FC<FailsafePreviewModalProps> = ({ result, onC
                                 </th>
                                 <th className="p-3">Transaction Info</th>
                                 <th className="p-3">Suggested Classification</th>
+                                <th className="p-3 w-20">Scope</th>
                                 <th className="p-3 w-32">Confidence</th>
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                             {filteredSuggestions.length === 0 ? (
-                                <tr><td colSpan={4} className="p-10 text-center text-slate-400">No suggestions meet criteria.</td></tr>
+                                <tr><td colSpan={5} className="p-10 text-center text-slate-400">No suggestions meet criteria.</td></tr>
                             ) : (
                                 filteredSuggestions.map(s => {
                                     const txn = state.transactions.byId[s.txnId];
                                     if (!txn) return null;
+                                    const hasReimb = s.reimbursable;
+                                    const hasSplit = s.splitRatio;
+                                    const hasOverride = s.scopeOverrideReason;
                                     return (
-                                        <tr key={s.txnId} className={`hover:bg-slate-50 ${selectedIds.has(s.txnId) ? 'bg-blue-50/30' : ''}`}>
+                                        <tr key={s.txnId} className={`hover:bg-slate-50 ${selectedIds.has(s.txnId) ? 'bg-blue-50/30' : ''} ${hasReimb ? 'border-l-2 border-l-orange-400' : ''}`}>
                                             <td className="p-3 text-center">
                                                 <input 
                                                     type="checkbox" 
@@ -180,12 +190,28 @@ const FailsafePreviewModal: React.FC<FailsafePreviewModalProps> = ({ result, onC
                                                 </div>
                                             </td>
                                             <td className="p-3">
-                                                <div className="flex flex-col">
-                                                    <div className="flex items-center gap-2">
+                                                <div className="flex flex-col gap-1">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
                                                         <span className="font-bold text-slate-700 text-xs px-2 py-0.5 bg-slate-200 rounded">{s.categoryCode}</span>
                                                         {s.entityName && <span className="text-xs text-blue-600 bg-blue-50 px-1.5 rounded">{s.entityName}</span>}
                                                     </div>
-                                                    <span className="text-[10px] text-slate-400 mt-1">{s.reason}</span>
+                                                    <div className="flex gap-1 flex-wrap">
+                                                        {hasReimb && <span className="text-[10px] font-bold text-orange-700 bg-orange-100 px-1.5 py-0.5 rounded">REIMBURSABLE</span>}
+                                                        {hasSplit && <span className="text-[10px] font-bold text-purple-700 bg-purple-100 px-1.5 py-0.5 rounded">50/50 SPLIT</span>}
+                                                        {s.flags.includes('PARENT_TRANSFER') && <span className="text-[10px] font-bold text-cyan-700 bg-cyan-100 px-1.5 py-0.5 rounded">PARENT</span>}
+                                                        {s.flags.includes('PERSONAL_DEBT_TRACKER') && <span className="text-[10px] font-bold text-red-700 bg-red-100 px-1.5 py-0.5 rounded">DEBT</span>}
+                                                        {s.flags.includes('ICD_EXCEPTION') && <span className="text-[10px] font-bold text-red-700 bg-red-100 px-1.5 py-0.5 rounded">ICD PERSONAL</span>}
+                                                        {s.flags.includes('TRANSFER_WASH') && <span className="text-[10px] text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded">WASH</span>}
+                                                    </div>
+                                                    <span className="text-[10px] text-slate-400">{s.reason}</span>
+                                                </div>
+                                            </td>
+                                            <td className="p-3">
+                                                <div className="flex flex-col gap-0.5">
+                                                    <span className={`text-xs font-bold px-2 py-0.5 rounded text-center ${s.scope === 'Company' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}`}>
+                                                        {s.scope}
+                                                    </span>
+                                                    {hasOverride && <span className="text-[9px] text-orange-600 leading-tight" title={s.scopeOverrideReason}>⚡ override</span>}
                                                 </div>
                                             </td>
                                             <td className="p-3">

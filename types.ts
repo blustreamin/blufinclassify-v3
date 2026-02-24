@@ -149,6 +149,12 @@ export interface Transaction {
     entityType?: string;
     reviewedAt?: string;
     reviewedBy?: string;
+    
+    // Failsafe V3 fields
+    reimbursable?: boolean;
+    splitRatio?: { personal: number; company: number };
+    classificationFlags?: string[];
+    scopeOverrideReason?: string;
 
     // AI/Auto Suggestions
     suggestedCategory?: string | null;
@@ -553,6 +559,9 @@ export interface FailsafeSuggestion {
     confidence: number;
     reason: string;
     flags: string[];
+    reimbursable?: boolean;
+    splitRatio?: { personal: number; company: number };
+    scopeOverrideReason?: string;
 }
 
 export interface FailsafeResult {

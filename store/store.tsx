@@ -294,7 +294,7 @@ const reducer = (state: AppState, action: Action): AppState => {
     }
 
     case 'TXN/CLASSIFY': {
-        const { txnId, scope, flow, categoryCode, entityType, entityCanonical, notes, markReviewed } = action.payload;
+        const { txnId, scope, flow, categoryCode, entityType, entityCanonical, notes, markReviewed, reimbursable, splitRatio, classificationFlags, scopeOverrideReason } = action.payload;
         const txn = newState.transactions.byId[txnId];
         if (!txn) return state;
 
@@ -329,6 +329,12 @@ const reducer = (state: AppState, action: Action): AppState => {
             txn.counterpartyNormalized = entityCanonical;
         }
         if (notes) txn.notes = notes;
+        
+        // Failsafe V3 fields
+        if (reimbursable !== undefined) txn.reimbursable = reimbursable;
+        if (splitRatio) txn.splitRatio = splitRatio;
+        if (classificationFlags) txn.classificationFlags = classificationFlags;
+        if (scopeOverrideReason) txn.scopeOverrideReason = scopeOverrideReason;
 
         // Handle Status Transition
         if (markReviewed) {

@@ -161,6 +161,27 @@ export const INITIAL_CATEGORIES: Category[] = [
   { code: 'DIRECTOR_PAYMENT', name: 'Director Payment', kind: 'TRANSFER', glGroup: 'DIRECTOR', active: true },
   { code: 'DIRECTOR_REIMBURSEMENT', name: 'Director Reimb.', kind: 'REIMBURSEMENT', glGroup: 'LIABILITY', active: true },
 
+  // --- COMPANY: BNPL SPLIT ---
+  { code: 'BNPL_COMPANY_SHARE', name: 'BNPL Company 50%', kind: 'EXPENSE', glGroup: 'OPS', active: true },
+
+  // --- COMPANY: VENDORS / FREELANCERS / COGS ---
+  { code: 'VENDOR_PAYMENT_COGS', name: 'Vendor COGS Payment', kind: 'EXPENSE', glGroup: 'COGS', active: true },
+  { code: 'FREELANCER_PAYMENT', name: 'Freelancer Payment', kind: 'EXPENSE', glGroup: 'COGS', active: true },
+  { code: 'MEETING_EXPENSE', name: 'Meeting Expense', kind: 'EXPENSE', glGroup: 'TRAVEL', active: true },
+  { code: 'CLIENT_ENTERTAINMENT', name: 'Client Entertainment', kind: 'EXPENSE', glGroup: 'TRAVEL', active: true },
+  { code: 'BANK_INTEREST_OD', name: 'OD Interest', kind: 'EXPENSE', glGroup: 'FINANCE', active: true },
+
+  // --- PARENT / FAMILY ---
+  { code: 'PARENT_LOAN_INFLOW', name: 'Parent Loan Inflow', kind: 'REVENUE', glGroup: 'LIABILITY', active: true },
+  { code: 'PARENT_LOAN_TO_COMPANY', name: 'Parent Loan to Co.', kind: 'REVENUE', glGroup: 'LIABILITY', active: true },
+  { code: 'PARENT_SUPPORT_INVESTMENT', name: 'Parent MF Support', kind: 'REVENUE', glGroup: 'PERSONAL_ASSET', active: true },
+  { code: 'PARENT_GIFT', name: 'Parent Gift', kind: 'REVENUE', glGroup: 'PERSONAL', active: true },
+
+  // --- PERSONAL: BNPL / LOANS / FRIENDS ---
+  { code: 'BNPL_PERSONAL_SHARE', name: 'BNPL Personal 50%', kind: 'EXPENSE', glGroup: 'PERSONAL', active: true },
+  { code: 'PERSONAL_LOAN_FRIEND', name: 'Loan (Friend)', kind: 'TRANSFER', glGroup: 'PERSONAL', active: true },
+  { code: 'PERSONAL_MUTUAL_FUND', name: 'Mutual Fund', kind: 'TRANSFER', glGroup: 'PERSONAL_ASSET', active: true },
+
   // --- PERSONAL: LIVING ---
   { code: 'PERSONAL_GROCERIES_DAILY_NEEDS', name: 'Groceries & Daily', kind: 'EXPENSE', glGroup: 'PERSONAL', active: true },
   { code: 'PERSONAL_GROCERIES', name: 'Groceries', kind: 'EXPENSE', glGroup: 'PERSONAL', active: true },
