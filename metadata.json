@@ -1,0 +1,8 @@
+{
+  "name": "bluFinClassify v3",
+  "description": "Local-first, zero-dependency accounting system with Gemini intelligence.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
