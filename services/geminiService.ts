@@ -7,7 +7,24 @@ import { generateId, getMonthFromDate, getFinancialYear } from "./utils";
 let _runtimeApiKey: string | null = null;
 
 export const setGeminiApiKey = (key: string) => { _runtimeApiKey = key; };
-export const getGeminiApiKey = (): string | null => _runtimeApiKey || (typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : null) || null;
+export const getGeminiApiKey = (): string | null => {
+  // 1. Runtime key (set via Settings page) — highest priority
+  if (_runtimeApiKey && _runtimeApiKey !== 'PLACEHOLDER_API_KEY') return _runtimeApiKey;
+  // 2. localStorage (persisted across sessions)
+  if (typeof localStorage !== 'undefined') {
+    const stored = localStorage.getItem('blufin_gemini_key');
+    if (stored && stored !== 'PLACEHOLDER_API_KEY') {
+      _runtimeApiKey = stored; // Cache it
+      return stored;
+    }
+  }
+  // 3. Vite-injected env var (build-time)
+  try {
+    const envKey = (process as any).env?.GEMINI_API_KEY;
+    if (envKey && envKey !== '' && envKey !== 'PLACEHOLDER_API_KEY') return envKey;
+  } catch {}
+  return null;
+};
 export const clearGeminiApiKey = () => { _runtimeApiKey = null; };
 
 const GEMINI_MODEL = 'gemini-2.0-flash';
@@ -871,13 +888,17 @@ export const runCoreIntelligence = async (
     instruments: Record<string, any>
 ): Promise<CoreIntelligenceResult | null> => {
     const ai = getAIClient();
-    if (!ai) return null;
+    if (!ai) {
+        console.error("Core Intelligence: No AI client — API key not set or invalid");
+        return null;
+    }
 
-    // 1. Prepare minimal inputs
-    const inputs = txns.map(t => ({
+    // 1. Prepare minimal inputs (limit to 200 txns to avoid token overflow)
+    const inputs = txns.slice(0, 200).map(t => ({
         id: t.id,
         txnDate: t.txnDate,
         description: t.description,
+        descriptionRaw: t.descriptionRaw || t.description,
         amount: t.amount,
         direction: t.direction,
         instrumentId: t.instrumentId,
@@ -887,12 +908,24 @@ export const runCoreIntelligence = async (
         categoryCode: t.categoryCode
     }));
 
-    // 2. Prepare Context (Registries) - Summarized to avoid token limits
+    // 2. Prepare Context (Registries) - use available fields
     const registryContext = {
-        companyVendors: registries.company_vendors.slice(0, 100).reduce((acc: any, v) => { acc[v.vendor_name_canonical] = { aliases: v.aliases_seen }; return acc; }, {}),
-        personalMerchants: registries.personal_merchants.slice(0, 100).reduce((acc: any, v) => { acc[v.vendor_name_canonical] = { aliases: v.aliases_seen }; return acc; }, {}),
-        employees: registries.employees.reduce((acc: any, e) => { acc[e.employee_name_canonical] = { aliases: e.identifiers_seen }; return acc; }, {}),
-        clients: registries.clients.reduce((acc: any, c) => { acc[c.client_name_canonical] = { aliases: c.aliases_seen }; return acc; }, {}),
+        companyVendors: registries.company_vendors.slice(0, 80).reduce((acc: any, v) => { 
+            acc[v.vendor_name_canonical] = { totalSpend: v.total_spend, txnCount: v.txn_count, categories: v.category_distribution }; 
+            return acc; 
+        }, {}),
+        personalMerchants: registries.personal_merchants.slice(0, 80).reduce((acc: any, v) => { 
+            acc[v.vendor_name_canonical] = { totalSpend: v.total_spend, txnCount: v.txn_count, categories: v.category_distribution }; 
+            return acc; 
+        }, {}),
+        employees: registries.employees.reduce((acc: any, e) => { 
+            acc[e.employee_name_canonical] = { totalPaid: e.total_paid, txnCount: e.txn_count }; 
+            return acc; 
+        }, {}),
+        clients: registries.clients.reduce((acc: any, c) => { 
+            acc[c.client_name_canonical] = { totalReceived: c.total_received, txnCount: c.txn_count }; 
+            return acc; 
+        }, {}),
     };
 
     try {

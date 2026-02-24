@@ -107,10 +107,16 @@ const MasterLedger: React.FC = () => {
                 state.registry.instruments
             );
             
-            if (result && result.suggestionsByTxn.length > 0) {
+            if (result && result.suggestionsByTxn && result.suggestionsByTxn.length > 0) {
                 dispatch({ type: 'INTELLIGENCE/APPLY_RESULTS', payload: { result } });
             } else {
-                alert("AI could not generate confident suggestions.");
+                const hasKey = !!localStorage.getItem('blufin_gemini_key');
+                if (!hasKey) {
+                    alert("Gemini API key not set. Go to Settings → General to add your key.");
+                } else {
+                    alert(`AI returned ${result?.suggestionsByTxn?.length || 0} suggestions for ${uncategorized.length} transactions. Check console for details.`);
+                    console.log('Core Intelligence result:', result);
+                }
             }
         } catch (e) {
             console.error(e);

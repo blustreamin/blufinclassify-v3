@@ -150,31 +150,83 @@ const SettingsPage: React.FC = () => {
 
       {/* Files */}
       {tab === 'files' && (
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-          <div className="divide-y divide-slate-50">
-            {state.documents.allIds.length === 0 ? (
-              <div className="p-8 text-center text-slate-400 text-sm">No files uploaded yet</div>
-            ) : (
-              state.documents.allIds.map(id => {
-                const doc = state.documents.byId[id];
-                if (!doc) return null;
-                const inst = state.registry.instruments[doc.instrumentId];
-                return (
-                  <div key={id} className="px-5 py-3 flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-3 min-w-0">
-                      <FileText size={16} className="text-slate-400 shrink-0"/>
-                      <div className="min-w-0">
-                        <div className="font-medium text-slate-700 truncate">{doc.fileName}</div>
-                        <div className="text-xs text-slate-400">{inst?.name || doc.instrumentId} • {doc.transactionCount} txns • {new Date(doc.uploadedAt).toLocaleDateString()}</div>
+        <div className="space-y-4">
+          {/* Summary bar */}
+          <div className="grid grid-cols-4 gap-3">
+            {(() => {
+              const docs = state.documents.allIds.map(id => state.documents.byId[id]).filter(Boolean);
+              const parsed = docs.filter(d => d.parseStatus === 'parsed' || (state.transactions.byDoc[d.id]?.length || 0) > 0);
+              const failed = docs.filter(d => d.parseStatus === 'failed' || ((state.transactions.byDoc[d.id]?.length || 0) === 0 && d.parseStatus !== 'partial'));
+              const totalTxns = docs.reduce((s, d) => s + (state.transactions.byDoc[d.id]?.length || 0), 0);
+              return <>
+                <div className="bg-white border border-slate-200 rounded-lg p-3 text-center">
+                  <div className="text-lg font-bold text-slate-800">{docs.length}</div>
+                  <div className="text-[10px] text-slate-400 uppercase font-medium">Files</div>
+                </div>
+                <div className="bg-white border border-green-200 rounded-lg p-3 text-center">
+                  <div className="text-lg font-bold text-green-600">{parsed.length}</div>
+                  <div className="text-[10px] text-green-500 uppercase font-medium">Parsed</div>
+                </div>
+                <div className="bg-white border border-red-200 rounded-lg p-3 text-center">
+                  <div className="text-lg font-bold text-red-600">{failed.length}</div>
+                  <div className="text-[10px] text-red-500 uppercase font-medium">Failed / Empty</div>
+                </div>
+                <div className="bg-white border border-blue-200 rounded-lg p-3 text-center">
+                  <div className="text-lg font-bold text-blue-600">{totalTxns.toLocaleString()}</div>
+                  <div className="text-[10px] text-blue-500 uppercase font-medium">Transactions</div>
+                </div>
+              </>;
+            })()}
+          </div>
+
+          {/* File list */}
+          <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+            <div className="divide-y divide-slate-50">
+              {state.documents.allIds.length === 0 ? (
+                <div className="p-8 text-center text-slate-400 text-sm">No files uploaded yet</div>
+              ) : (
+                state.documents.allIds.map(id => {
+                  const doc = state.documents.byId[id];
+                  if (!doc) return null;
+                  const inst = state.registry.instruments[doc.instrumentId];
+                  const txnCount = state.transactions.byDoc[doc.id]?.length || 0;
+                  const hasData = txnCount > 0;
+                  const sizeKB = doc.sizeBytes ? (doc.sizeBytes / 1024).toFixed(0) : '?';
+                  const statusColor = hasData ? 'bg-green-100 text-green-700' : 
+                    doc.parseStatus === 'failed' ? 'bg-red-100 text-red-700' :
+                    doc.parseStatus === 'partial' ? 'bg-amber-100 text-amber-700' : 'bg-slate-100 text-slate-500';
+                  const statusLabel = hasData ? `${txnCount} txns` : 
+                    doc.parseStatus === 'failed' ? 'FAILED' :
+                    doc.parseError ? doc.parseError.slice(0, 30) : 'NO DATA';
+                  const typeColor = doc.fileType === 'IMAGE' ? 'bg-purple-100 text-purple-600' :
+                    doc.fileType === 'CSV' ? 'bg-blue-100 text-blue-600' :
+                    doc.fileType === 'XLS' || doc.fileType === 'XLSX' ? 'bg-green-100 text-green-600' : 'bg-slate-100 text-slate-500';
+
+                  return (
+                    <div key={id} className="px-5 py-3">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <FileText size={16} className="text-slate-400 shrink-0"/>
+                          <div className="min-w-0 flex-1">
+                            <div className="font-medium text-slate-700 truncate text-sm">{doc.fileName}</div>
+                            <div className="flex items-center gap-2 mt-1 flex-wrap">
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${typeColor}`}>{doc.fileType}</span>
+                              <span className="text-[10px] text-slate-400">{inst?.name || doc.instrumentId}</span>
+                              {doc.statementMonthHint && <span className="text-[10px] text-slate-400 font-mono">{doc.statementMonthHint}</span>}
+                              <span className="text-[10px] text-slate-300">{sizeKB} KB</span>
+                              <span className="text-[10px] text-slate-300">{new Date(doc.uploadedAt).toLocaleDateString()}</span>
+                            </div>
+                          </div>
+                        </div>
+                        <span className={`text-[10px] font-bold px-2 py-1 rounded whitespace-nowrap ${statusColor}`}>
+                          {statusLabel}
+                        </span>
                       </div>
                     </div>
-                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded uppercase ${doc.status === 'parsed' ? 'bg-green-100 text-green-700' : 'bg-amber-100 text-amber-700'}`}>
-                      {doc.status}
-                    </span>
-                  </div>
-                );
-              })
-            )}
+                  );
+                })
+              )}
+            </div>
           </div>
         </div>
       )}

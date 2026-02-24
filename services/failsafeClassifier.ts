@@ -141,7 +141,13 @@ const RENT_TOKENS = ['PETALSRENT', 'PETALS RENT', 'RENT MAINTENANC'];
 const ELECTRICITY_TOKENS = ['ELECTRICITY', 'TNEB', 'TAMIL NADU/ELECTRICITY', 'TAMILNADU'];
 const LOAN_EMI_TOKENS = ['HERO FINCORP', 'HEROFINCORP', 'HFCL', 'BAJAJ FINANCE', 'EMI'];
 const INVESTMENT_TOKENS = ['MUTUAL FUND', 'BSE STAR', 'BSESTARMF', 'INDIAN CLEARING CORP'];
-const CC_BILL_TOKENS = ['CC BILL', 'CCBILL', 'CC/5474', 'CCPAYMENT', 'CC BILLPAY', 'AUTO DEBIT CC'];
+const CC_BILL_TOKENS = [
+    'CC BILL', 'CCBILL', 'CC/5474', 'CCPAYMENT', 'CC BILLPAY', 'AUTO DEBIT CC',
+    'CREDIT CARD', 'PAVC',  // ICICI "Pay any Visa credit card"
+    'VENKYICICI',  // Alias for CC payment from CA to SB
+];
+// Patterns that look like CC bill but need the CC-specific sub-pattern
+const CC_BILL_BIL_PATTERN = /BIL\/\d+\/CC\//i;  // BIL/000996848831/Cc/547467...
 const FACEBOOK_ADS = ['FACEBOOK', 'WWW FACEBOOK COM', 'META ADS'];
 const GOOGLE_ADS = ['GOOGLE ADS'];
 const UBER_TOKENS = ['UBER', 'UBERINDIA', 'UBERRIDE'];
@@ -546,8 +552,8 @@ export const runFailsafeClassification = (
                 }
             }
 
-            // 8.4 CC Bill Payment (wash)
-            else if (containsAny(text, CC_BILL_TOKENS)) {
+            // 8.4 CC Bill Payment (wash) — all legs of CA → SB → CC chain
+            else if (containsAny(text, CC_BILL_TOKENS) || CC_BILL_BIL_PATTERN.test(txn.descriptionRaw || txn.description || '')) {
                 categoryCode = 'CC_BILL_PAYMENT';
                 entityType = 'BankCharge';
                 confidence += 0.35;
@@ -715,12 +721,19 @@ export const runFailsafeClassification = (
                 confidence += 0.40; reason = 'Loan EMI';
             }
 
-            // 8.20 Transfers (self/company)
-            else if (text.includes('TRANSFER') || (text.includes('INFT') && (text.includes('BLUSTREAM') || text.includes('SELF')))) {
-                if (isCompany) categoryCode = 'COMPANY_TRANSFER';
-                else categoryCode = 'PERSONAL_TRANSFER';
-                confidence += 0.20; reason = 'Transfer';
-                flags.push('TRANSFER_WASH');
+            // 8.20 Transfers (self/company) — catches CA↔SB transfers 
+            else if (
+                text.includes('TRANSFER') || 
+                (text.includes('INFT') && (text.includes('BLUSTREAM') || text.includes('SELF') || text.includes('SVIJAY') || text.includes('VENKAT') || text.includes('SHANKAR'))) ||
+                (text.includes('INF/') && text.includes('INFT') && !containsAny(text, [...TELCO_VENDORS, ...GST_PAYMENT_TOKENS])) // INF/INFT not already caught = likely self-transfer
+            ) {
+                // Check if it's already caught as CC bill (CREDIT CARD, VENKYICICI)
+                if (!containsAny(text, CC_BILL_TOKENS)) {
+                    if (isCompany) categoryCode = 'COMPANY_TRANSFER';
+                    else categoryCode = 'PERSONAL_TRANSFER';
+                    confidence += 0.20; reason = 'Transfer';
+                    flags.push('TRANSFER_WASH');
+                }
             }
 
             emit();
