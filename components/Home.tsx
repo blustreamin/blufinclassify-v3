@@ -138,6 +138,13 @@ const Home: React.FC = () => {
           processed++;
         }
 
+        setUploadMsg(`Processed ${processed + failed}/${arr.length} — ${processed} ok, ${failed} failed...`);
+
+        // Rate limit delay for Gemini API calls (image files)
+        if (fileType === 'IMAGE') {
+          await new Promise(r => setTimeout(r, 1500));
+        }
+
         setUploadMsg(`Processed ${processed}/${arr.length}...`);
       } catch (e) {
         console.error('Upload error for', file.name, e);

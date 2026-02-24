@@ -1,11 +1,12 @@
 
-import React, { ReactNode } from 'react';
+import React, { ReactNode, useEffect } from 'react';
 import Layout from './components/Layout';
 import Home from './components/Home';
 import FullLedger from './components/Ledger';
 import Reports from './components/Reports';
 import SettingsPage from './components/SettingsPage';
 import { StoreProvider, useStore } from './store/store';
+import { setGeminiApiKey } from './services/geminiService';
 
 // Keep old imports for backward compat (deep links, legacy routes)
 import Overview from './components/Overview';
@@ -65,6 +66,15 @@ class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundarySta
 const AppContent: React.FC = () => {
   const { state } = useStore();
   const tab = state.ui.nav.currentRoute;
+
+  // Load Gemini API key from localStorage on app startup
+  // (not just when Settings page renders)
+  useEffect(() => {
+    const stored = localStorage.getItem('blufin_gemini_key');
+    if (stored) {
+      setGeminiApiKey(stored);
+    }
+  }, []);
 
   return (
     <Layout>
