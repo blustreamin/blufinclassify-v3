@@ -27,7 +27,7 @@ export const getGeminiApiKey = (): string | null => {
 };
 export const clearGeminiApiKey = () => { _runtimeApiKey = null; };
 
-const GEMINI_MODEL = 'gemini-1.5-flash';
+const GEMINI_MODEL = 'gemini-1.5-flash-latest';
 
 const getAIClient = () => {
   const key = getGeminiApiKey();
@@ -35,7 +35,7 @@ const getAIClient = () => {
     console.warn("Gemini API Key not set. AI features disabled.");
     return null;
   }
-  return new GoogleGenAI({ apiKey: key, httpOptions: { apiVersion: 'v1' } });
+  return new GoogleGenAI({ apiKey: key });
 };
 
 // ... existing MASTER_INTELLIGENCE_PROMPT ...
