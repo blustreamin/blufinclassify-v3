@@ -106,22 +106,31 @@ const Reports: React.FC = () => {
 };
 
 // ─── P&L View ───
-const PnLView: React.FC<{ report: any; fmt: (v: number) => string; month: string }> = ({ report, fmt, month }) => (
+const PnLView: React.FC<{ report: any; fmt: (v: number) => string; month: string }> = ({ report, fmt, month }) => {
+  const pnl = report.pnl || {};
+  const rev = pnl.revenue || {};
+  const totalRevenue = rev.total || 0;
+  const totalExpense = pnl.totalExpense || 0;
+  const netProfit = pnl.netProfit || 0;
+  const expenses = pnl.expenses || {};
+  const marginPct = report.coreHealth?.operatingMarginPercent || 0;
+
+  return (
   <div className="space-y-6">
     {/* Summary Cards */}
     <div className="grid grid-cols-3 gap-4">
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
         <div className="text-xs text-slate-400 font-medium uppercase">Revenue</div>
-        <div className="text-2xl font-bold text-green-600 mt-1">{fmt(report.pnl.totalRevenue)}</div>
+        <div className="text-2xl font-bold text-green-600 mt-1">{fmt(totalRevenue)}</div>
       </div>
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm">
         <div className="text-xs text-slate-400 font-medium uppercase">Total Expenses</div>
-        <div className="text-2xl font-bold text-slate-800 mt-1">{fmt(report.pnl.totalExpenses)}</div>
+        <div className="text-2xl font-bold text-slate-800 mt-1">{fmt(totalExpense)}</div>
       </div>
-      <div className={`bg-white border rounded-xl p-6 shadow-sm ${report.pnl.netProfit >= 0 ? 'border-green-200' : 'border-red-200'}`}>
+      <div className={`bg-white border rounded-xl p-6 shadow-sm ${netProfit >= 0 ? 'border-green-200' : 'border-red-200'}`}>
         <div className="text-xs text-slate-400 font-medium uppercase">Net Profit</div>
-        <div className={`text-2xl font-bold mt-1 ${report.pnl.netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt(report.pnl.netProfit)}</div>
-        <div className="text-xs text-slate-400 mt-1">Margin: {report.coreHealth.operatingMarginPercent}%</div>
+        <div className={`text-2xl font-bold mt-1 ${netProfit >= 0 ? 'text-green-600' : 'text-red-600'}`}>{fmt(netProfit)}</div>
+        <div className="text-xs text-slate-400 mt-1">Margin: {marginPct}%</div>
       </div>
     </div>
 
@@ -131,9 +140,9 @@ const PnLView: React.FC<{ report: any; fmt: (v: number) => string; month: string
         <h3 className="text-sm font-bold text-slate-700">Expense Breakdown</h3>
       </div>
       <div className="divide-y divide-slate-50">
-        {Object.entries(report.pnl.expensesByGroup || {}).filter(([,v]: any) => v > 0).sort((a: any, b: any) => b[1] - a[1]).map(([group, amount]: any) => (
+        {Object.entries(expenses).filter(([,v]: any) => v > 0).sort((a: any, b: any) => b[1] - a[1]).map(([group, amount]: any) => (
           <div key={group} className="px-5 py-3 flex items-center justify-between text-sm">
-            <span className="text-slate-600">{group}</span>
+            <span className="text-slate-600">{group.replace(/_/g, ' ')}</span>
             <span className="font-mono font-medium text-slate-800">{fmt(amount)}</span>
           </div>
         ))}
@@ -142,13 +151,14 @@ const PnLView: React.FC<{ report: any; fmt: (v: number) => string; month: string
 
     {/* KPIs */}
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-      <KPI label="MCO SaaS" value={fmt(report.toolsSubscriptions.mcoSaasSpend)} />
-      <KPI label="IT Infra" value={fmt(report.toolsSubscriptions.itInfraSpend)} />
-      <KPI label="Bank Charges" value={fmt(report.controlLeakage.bankChargesTotal)} color="text-red-600" />
-      <KPI label="Unclassified" value={`${report.controlLeakage.unclassifiedSpendPercent}%`} color={report.controlLeakage.unclassifiedSpendPercent > 5 ? 'text-red-600' : 'text-slate-700'} />
+      <KPI label="MCO SaaS" value={fmt(report.toolsSubscriptions?.mcoSaasSpend || 0)} />
+      <KPI label="IT Infra" value={fmt(report.toolsSubscriptions?.itInfraSpend || 0)} />
+      <KPI label="Bank Charges" value={fmt(report.controlLeakage?.bankChargesTotal || 0)} color="text-red-600" />
+      <KPI label="Unclassified" value={`${report.controlLeakage?.unclassifiedSpendPercent || 0}%`} color={(report.controlLeakage?.unclassifiedSpendPercent || 0) > 5 ? 'text-red-600' : 'text-slate-700'} />
     </div>
   </div>
-);
+  );
+};
 
 const KPI: React.FC<{ label: string; value: string; color?: string }> = ({ label, value, color = 'text-slate-800' }) => (
   <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">

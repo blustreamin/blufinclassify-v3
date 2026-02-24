@@ -19,6 +19,9 @@ const Home: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState('');
   const [lastUploadCount, setLastUploadCount] = useState(0);
+  const [showInstrumentPicker, setShowInstrumentPicker] = useState(false);
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [selectedInstrument, setSelectedInstrument] = useState('');
   const folderRef = useRef<HTMLInputElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -32,12 +35,28 @@ const Home: React.FC = () => {
   };
 
   // Quick Upload (folder or files)
-  const handleFiles = async (files: FileList | File[]) => {
+  const handleFiles = async (files: FileList | File[], forceInstrumentId?: string) => {
     const arr = Array.from(files).filter(f => {
       const path = (f as any).webkitRelativePath || '';
       return !path.toLowerCase().includes('/old/') && !path.toLowerCase().includes(' old');
     });
     if (arr.length === 0) return;
+
+    // For single/multiple files without folder paths, try auto-detect first
+    // If it fails for any file, show instrument picker
+    if (!forceInstrumentId) {
+      const hasFolder = arr.some(f => (f as any).webkitRelativePath);
+      if (!hasFolder) {
+        // Try auto-detect on first file
+        const testId = detectInstrument(arr[0], '', state.registry.instruments);
+        if (!testId) {
+          // Can't auto-detect — ask user to pick instrument
+          setPendingFiles(arr);
+          setShowInstrumentPicker(true);
+          return;
+        }
+      }
+    }
 
     setUploading(true);
     setUploadMsg(`Processing ${arr.length} file${arr.length > 1 ? 's' : ''}...`);
@@ -47,7 +66,7 @@ const Home: React.FC = () => {
     for (const file of arr) {
       try {
         const relativePath = (file as any).webkitRelativePath || '';
-        const instrumentId = detectInstrument(file, relativePath, state.registry.instruments);
+        const instrumentId = forceInstrumentId || detectInstrument(file, relativePath, state.registry.instruments);
         if (!instrumentId) { failed++; continue; }
 
         const inst = state.registry.instruments[instrumentId];
@@ -81,8 +100,17 @@ const Home: React.FC = () => {
 
     setUploading(false);
     setLastUploadCount(processed);
-    setUploadMsg(processed > 0 ? `Done — ${processed} file${processed > 1 ? 's' : ''} ingested` : 'No new files processed');
-    setTimeout(() => setUploadMsg(''), 4000);
+    setUploadMsg(processed > 0 ? `Done — ${processed} file${processed > 1 ? 's' : ''} ingested${failed > 0 ? `, ${failed} failed` : ''}` : `No new files processed${failed > 0 ? ` (${failed} failed)` : ''}`);
+    setTimeout(() => setUploadMsg(''), 5000);
+  };
+
+  const handleInstrumentConfirm = () => {
+    if (selectedInstrument && pendingFiles.length) {
+      setShowInstrumentPicker(false);
+      handleFiles(pendingFiles, selectedInstrument);
+      setPendingFiles([]);
+      setSelectedInstrument('');
+    }
   };
 
   const txnCount = state.transactions.allIds.length;
@@ -248,6 +276,48 @@ const Home: React.FC = () => {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Instrument Picker Modal */}
+      {showInstrumentPicker && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 backdrop-blur-sm" onClick={() => { setShowInstrumentPicker(false); setPendingFiles([]); }}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md" onClick={e => e.stopPropagation()}>
+            <div className="p-5 border-b border-slate-100">
+              <h3 className="font-bold text-slate-800">Select Instrument</h3>
+              <p className="text-xs text-slate-500 mt-1">Which account do these {pendingFiles.length} file(s) belong to?</p>
+            </div>
+            <div className="p-4 max-h-60 overflow-y-auto space-y-1">
+              {state.registry.instrumentOrder.map(id => {
+                const inst = state.registry.instruments[id];
+                return (
+                  <button
+                    key={id}
+                    onClick={() => setSelectedInstrument(id)}
+                    className={`w-full px-4 py-3 rounded-lg text-sm text-left transition-colors flex items-center gap-3 ${
+                      selectedInstrument === id ? 'bg-blue-50 border border-blue-200 text-blue-800' : 'hover:bg-slate-50 border border-transparent'
+                    }`}
+                  >
+                    <div className={`w-2 h-2 rounded-full ${inst.instrumentType.includes('COMPANY') || inst.instrumentType.includes('CA') ? 'bg-blue-500' : inst.instrumentType.includes('BNPL') ? 'bg-purple-500' : 'bg-green-500'}`} />
+                    <div>
+                      <div className="font-medium">{inst.name}</div>
+                      <div className="text-[10px] text-slate-400">{inst.institution} • {inst.instrumentType}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="p-4 border-t border-slate-100 flex justify-end gap-2">
+              <button onClick={() => { setShowInstrumentPicker(false); setPendingFiles([]); }} className="px-4 py-2 text-sm text-slate-600 hover:bg-slate-100 rounded-lg">Cancel</button>
+              <button
+                onClick={handleInstrumentConfirm}
+                disabled={!selectedInstrument}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Upload
+              </button>
+            </div>
           </div>
         </div>
       )}

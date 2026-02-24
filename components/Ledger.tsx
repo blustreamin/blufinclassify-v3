@@ -77,10 +77,17 @@ const MasterLedger: React.FC = () => {
     };
 
     const handleMagicSuggest = async () => {
-        // Run on all UNCLASSIFIED transactions in the current visible month
-        const uncategorized = visibleTxns.filter(t => !t.categoryCode && t.amount > 0 && !t.manualOverride);
+        // Run on transactions that haven't been manually reviewed yet
+        const uncategorized = visibleTxns.filter(t => {
+            // No category at all
+            if (!t.categoryCode || t.categoryCode === 'UNCATEGORIZED') return true;
+            // Has failsafe suggestion but not manually reviewed
+            if (t.classificationStatus !== 'REVIEWED' && !t.manualOverride) return true;
+            return false;
+        }).filter(t => t.amount > 0);
+        
         if (uncategorized.length === 0) {
-            alert("No uncategorized transactions to suggest for!");
+            alert("All transactions are already classified or reviewed. To re-suggest, use the No-AI Classifier which regenerates suggestions for everything.");
             return;
         }
 
