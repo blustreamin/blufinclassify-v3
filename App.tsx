@@ -8,17 +8,9 @@ import Library from './components/Library';
 import ParseLab from './components/ParseLab';
 import Registries from './components/Registries';
 import MasterAnalysis from './components/MasterAnalysis';
-import DirectorReconciliation from './components/DirectorReconciliation'; // Import
+import DirectorReconciliation from './components/DirectorReconciliation';
 import { CompanyExpenses, CompanyRevenue, CompanyPnL, DirectorPersonal } from './components/FinancialViews';
 import { StoreProvider, useStore } from './store/store';
-
-// Firebase Guard
-if ((window as any).firebase) {
-  console.warn("Firebase detected but disabled for local-only mode.");
-  try {
-      delete (window as any).firebase;
-  } catch(e) {}
-}
 
 interface ErrorBoundaryProps {
   children?: ReactNode;

@@ -3,12 +3,22 @@ import { GoogleGenAI, Type } from "@google/genai";
 import { Transaction, CoreIntelligenceResult, EnrichmentRegistries, Category, MasterAnalysisResult } from "../types";
 import { generateId, getMonthFromDate, getFinancialYear } from "./utils";
 
+// Runtime API key management - user can set their own key
+let _runtimeApiKey: string | null = null;
+
+export const setGeminiApiKey = (key: string) => { _runtimeApiKey = key; };
+export const getGeminiApiKey = (): string | null => _runtimeApiKey || (typeof process !== 'undefined' ? process.env.GEMINI_API_KEY : null) || null;
+export const clearGeminiApiKey = () => { _runtimeApiKey = null; };
+
+const GEMINI_MODEL = 'gemini-2.0-flash';
+
 const getAIClient = () => {
-  if (!process.env.API_KEY) {
-    console.warn("API Key missing");
+  const key = getGeminiApiKey();
+  if (!key || key === 'PLACEHOLDER_API_KEY') {
+    console.warn("Gemini API Key not set. AI features disabled.");
     return null;
   }
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  return new GoogleGenAI({ apiKey: key });
 };
 
 // ... existing MASTER_INTELLIGENCE_PROMPT ...
@@ -749,7 +759,7 @@ export const analyzeImageForTransaction = async (
   if (!ai) return null;
 
   try {
-    const model = "gemini-3-pro-preview"; 
+     
     // Using a simpler prompt for image analysis than the massive one above
     const prompt = `Analyze this financial document image and extract transactions. Return JSON.`;
     const responseSchema = {
@@ -780,7 +790,7 @@ export const analyzeImageForTransaction = async (
     };
 
     const response = await ai.models.generateContent({
-      model,
+      model: GEMINI_MODEL,
       contents: { parts: [{ inlineData: { mimeType, data: base64Data } }, { text: prompt }] },
       config: { responseMimeType: "application/json", responseSchema: responseSchema },
     });
@@ -808,7 +818,7 @@ export const analyzeImageForTransaction = async (
             counterpartyType: "Unknown",
             month: getMonthFromDate(row.date || null),
             financialYear: getFinancialYear(row.date || null),
-            parse: { method: 'GEMINI_AI_PRO', parserId: 'gemini-3-pro-preview', anchorsMatched: row.confidence_factors?.header_anchor ? ['AI_HEADER_MATCH'] : [], warnings: row.audit_trace?.normalization_notes || [], rawRow: row },
+            parse: { method: 'GEMINI_AI_PRO', parserId: GEMINI_MODEL, anchorsMatched: row.confidence_factors?.header_anchor ? ['AI_HEADER_MATCH'] : [], warnings: row.audit_trace?.normalization_notes || [], rawRow: row },
             tags: ['AI_EXTRACTED', `CONFIDENCE_${row.confidence_band || 'U'}`]
         };
         results.push(txn);
@@ -940,7 +950,7 @@ export const runCoreIntelligence = async (
         };
 
         const response = await ai.models.generateContent({
-            model: "gemini-3-pro-preview",
+            model: GEMINI_MODEL,
             contents: `
             ${MASTER_INTELLIGENCE_PROMPT}
 
@@ -988,7 +998,7 @@ export const runMasterAnalysis = async (
 
     try {
         const response = await ai.models.generateContent({
-            model: "gemini-3-pro-preview",
+            model: GEMINI_MODEL,
             config: {
                 responseMimeType: "application/json",
                 thinkingConfig: { thinkingBudget: 32768 }
@@ -1025,7 +1035,7 @@ export const runCsvNormalization = async (files: File[]): Promise<string | null>
         }
 
         const response = await ai.models.generateContent({
-            model: "gemini-3-pro-preview",
+            model: GEMINI_MODEL,
             config: {
                 thinkingConfig: { thinkingBudget: 32768 }
             },
@@ -1045,8 +1055,8 @@ export const runCsvNormalization = async (files: File[]): Promise<string | null>
     }
 };
 
-// Fallback legacy functions required by other files but now deprecated/unused logic
-export const runCategoryAutoSuggest = async (txns: any[], registries: any, categories: any[]): Promise<any> => { return []; };
-export const runLedgerEnrichment = async (txns: any[], instruments: any): Promise<any> => { return null; };
-export const askAccountantAI = async (query: string, context: string): Promise<string> => { return ""; };
-export const runDeepAnalysis = async (context: any): Promise<any> => { return null; };
+// Legacy stubs (deprecated - kept for import compatibility)
+export const runCategoryAutoSuggest = async (): Promise<any> => [];
+export const runLedgerEnrichment = async (): Promise<any> => null;
+export const askAccountantAI = async (): Promise<string> => "";
+export const runDeepAnalysis = async (): Promise<any> => null;

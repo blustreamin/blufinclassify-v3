@@ -681,6 +681,265 @@ const parseGeminiVisionV1 = async (file: File, instrumentId: string): Promise<Pa
     };
 };
 
+// 6. PDF TEXT V1 (Extract text from PDF using pdfjs-dist, then parse like CSV)
+const parsePdfTextV1 = async (file: File, instrumentId: string): Promise<ParsedResult> => {
+    const warnings: string[] = [];
+    const typeHint = getInstrumentTypeHint(instrumentId);
+    
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        
+        let fullText = '';
+        for (let i = 1; i <= pdf.numPages; i++) {
+            const page = await pdf.getPage(i);
+            const content = await page.getTextContent();
+            const pageText = content.items
+                .map((item: any) => item.str)
+                .join(' ');
+            fullText += pageText + '\n';
+        }
+        
+        if (!fullText.trim()) {
+            warnings.push('PDF_NO_TEXT_EXTRACTED');
+            // Fallback to Gemini Vision if no text extracted (scanned PDF)
+            return await parseGeminiVisionV1(file, instrumentId);
+        }
+        
+        // Parse the extracted text line by line looking for transaction patterns
+        const lines = fullText.split('\n').map(l => l.trim()).filter(Boolean);
+        const txns: (Transaction & { counterpartyNameGuess?: string | null })[] = [];
+        const dateStats = { level1_Explicit: 0, level2_Header: 0, level3_Filled: 0, level4_Missing: 0 };
+        const amountStats = { level1_Explicit: 0, level2_Split: 0, level3_Text: 0, level4_Balance: 0, level5_Missing: 0 };
+        const descStats = { total: 0, merchantIdentified: 0, lowConfidence: 0, bankCharges: 0, bnplMerchants: 0 };
+        
+        // Date pattern: DD/MM/YYYY, DD-MM-YYYY, DD MMM YYYY, etc.
+        const dateRegex = /(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{1,2}\s+(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*\s+\d{2,4})/i;
+        // Amount pattern: numbers with commas and optional decimals
+        const amountRegex = /(\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?|\d+\.\d{1,2})/g;
+        
+        let lastDate: string | null = null;
+        
+        for (const line of lines) {
+            if (line.length < 10) continue;
+            if (isGarbageRow({ description: line })) continue;
+            
+            const dateMatch = line.match(dateRegex);
+            if (!dateMatch) continue; // Skip lines without dates — likely not transactions
+            
+            const dateRes = resolveTransactionDate(dateMatch[1], typeHint, lastDate, null);
+            if (dateRes.date) lastDate = dateRes.date;
+            
+            // Extract amounts from the line
+            const amounts = [...line.matchAll(amountRegex)].map(m => parseFloat(m[1].replace(/,/g, '')));
+            if (amounts.length === 0) continue;
+            
+            // Use the largest amount as the transaction amount (heuristic)
+            const amount = Math.max(...amounts);
+            if (amount === 0) continue;
+            
+            // Remove the date and amount from description
+            let description = line
+                .replace(dateRegex, '')
+                .replace(amountRegex, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+            
+            if (description.length < 3) continue;
+            
+            const descRes = resolveDescription(description, typeHint);
+            
+            // Determine direction: look for CR/DR markers or column position
+            const upperLine = line.toUpperCase();
+            let direction: 'DEBIT' | 'CREDIT' = 'DEBIT';
+            if (upperLine.includes(' CR') || upperLine.includes('CREDIT') || upperLine.includes('DEPOSIT')) {
+                direction = 'CREDIT';
+            }
+            
+            dateStats.level1_Explicit++;
+            amountStats.level1_Explicit++;
+            descStats.total++;
+            if (descRes.metadata.merchantName) descStats.merchantIdentified++;
+            
+            txns.push(createTxn({
+                instrumentId,
+                txnDate: dateRes.date,
+                dateMetadata: dateRes.metadata,
+                description: descRes.description,
+                descriptionRaw: line,
+                descriptionMetadata: descRes.metadata,
+                amount,
+                amountMetadata: { level: 'LEVEL_1_EXPLICIT', confidence: 'MEDIUM', source: 'PDF_TEXT', issue: null },
+                direction,
+                counterpartyNameGuess: descRes.metadata.merchantName,
+                status: 'draft',
+                needsAttention: !dateRes.date,
+                issues: [],
+                parserId: 'pdf_text_v1',
+                rawRow: line
+            }));
+        }
+        
+        if (txns.length === 0) {
+            warnings.push('PDF_TEXT_NO_TRANSACTIONS_FOUND');
+            // Fallback to Gemini Vision
+            return await parseGeminiVisionV1(file, instrumentId);
+        }
+        
+        const report = createReport('PDF_TEXT', 'PdfTextV1', txns.length, ['TextExtracted']);
+        report.dateStats = dateStats;
+        report.amountStats = amountStats;
+        report.descriptionStats = descStats;
+        
+        return {
+            docMeta: { extractedInstitutionName: null },
+            txns,
+            warnings,
+            parseReport: report
+        };
+    } catch (e: any) {
+        console.error('PDF Text Parse Failed, falling back to Vision', e);
+        warnings.push('PDF_TEXT_PARSE_ERROR: ' + e.message);
+        // Fallback to Gemini Vision for any PDF parse failure
+        return await parseGeminiVisionV1(file, instrumentId);
+    }
+};
+
+// 7. GENERIC CSV V1 (Auto-detect headers for any bank CSV)
+const parseGenericCsvV1 = async (file: File, instrumentId: string): Promise<ParsedResult> => {
+    const text = await file.text();
+    const warnings: string[] = [];
+    const typeHint = getInstrumentTypeHint(instrumentId);
+    
+    const parseRes = Papa.parse(text, { skipEmptyLines: true, header: false });
+    const rows = parseRes.data as string[][];
+    
+    // Auto-detect header row by scanning first 30 rows for date/amount/description columns
+    let headerIdx = -1;
+    let map: Record<string, number> = {};
+    
+    const DATE_ALIASES = ['date', 'transaction date', 'txn date', 'value date', 'posting date', 'trans date', 'tran date'];
+    const AMOUNT_ALIASES = ['amount', 'debit', 'credit', 'withdrawal', 'deposit', 'txn amount', 'transaction amount', 'debit amount', 'credit amount'];
+    const DESC_ALIASES = ['description', 'narration', 'particulars', 'details', 'transaction details', 'remarks', 'transaction particulars'];
+    const BALANCE_ALIASES = ['balance', 'closing balance', 'running balance'];
+    
+    for (let i = 0; i < Math.min(rows.length, 30); i++) {
+        const row = rows[i].map(c => c?.toLowerCase().trim() || '');
+        
+        let dateCol = -1, descCol = -1, amtCol = -1, debitCol = -1, creditCol = -1, balCol = -1;
+        
+        row.forEach((col, idx) => {
+            if (DATE_ALIASES.some(a => col === a || col.startsWith(a))) dateCol = idx;
+            if (DESC_ALIASES.some(a => col === a || col.startsWith(a))) descCol = idx;
+            if (col === 'amount' || col === 'txn amount' || col === 'transaction amount') amtCol = idx;
+            if (col.includes('debit') || col === 'withdrawal' || col === 'withdrawal amt') debitCol = idx;
+            if (col.includes('credit') || col === 'deposit' || col === 'deposit amt') creditCol = idx;
+            if (BALANCE_ALIASES.some(a => col === a || col.startsWith(a))) balCol = idx;
+        });
+        
+        if (dateCol >= 0 && (amtCol >= 0 || debitCol >= 0 || creditCol >= 0) && descCol >= 0) {
+            headerIdx = i;
+            map = { date: dateCol, desc: descCol };
+            if (amtCol >= 0) map['amt'] = amtCol;
+            if (debitCol >= 0) map['debit'] = debitCol;
+            if (creditCol >= 0) map['credit'] = creditCol;
+            if (balCol >= 0) map['balance'] = balCol;
+            break;
+        }
+    }
+    
+    if (headerIdx === -1) {
+        // Fall back to ICICI parser as last resort
+        return await parseIciciCcCsvV2(file, instrumentId);
+    }
+    
+    const txns: (Transaction & { counterpartyNameGuess?: string | null })[] = [];
+    const dateStats = { level1_Explicit: 0, level2_Header: 0, level3_Filled: 0, level4_Missing: 0 };
+    const amountStats = { level1_Explicit: 0, level2_Split: 0, level3_Text: 0, level4_Balance: 0, level5_Missing: 0 };
+    const descStats = { total: 0, merchantIdentified: 0, lowConfidence: 0, bankCharges: 0, bnplMerchants: 0 };
+    let lastDate: string | null = null;
+    
+    for (let i = headerIdx + 1; i < rows.length; i++) {
+        const row = rows[i];
+        if (row.length < 2) continue;
+        
+        const dateRaw = map['date'] !== undefined ? row[map['date']] : '';
+        const descRaw = map['desc'] !== undefined ? row[map['desc']] : '';
+        
+        if (!dateRaw && !descRaw) continue;
+        
+        // Amount resolution: single column or split debit/credit
+        let amount = 0;
+        let direction: 'DEBIT' | 'CREDIT' = 'DEBIT';
+        
+        if (map['amt'] !== undefined) {
+            const raw = (row[map['amt']] || '').replace(/[,\s]/g, '');
+            amount = Math.abs(parseFloat(raw) || 0);
+            // Check for sign column or negative values
+            if (map['sign'] !== undefined) {
+                const sign = (row[map['sign']] || '').toUpperCase();
+                direction = sign.includes('CR') ? 'CREDIT' : 'DEBIT';
+            }
+        } else {
+            // Split columns
+            const debitRaw = map['debit'] !== undefined ? (row[map['debit']] || '').replace(/[,\s]/g, '') : '';
+            const creditRaw = map['credit'] !== undefined ? (row[map['credit']] || '').replace(/[,\s]/g, '') : '';
+            const debitAmt = Math.abs(parseFloat(debitRaw) || 0);
+            const creditAmt = Math.abs(parseFloat(creditRaw) || 0);
+            
+            if (debitAmt > 0) { amount = debitAmt; direction = 'DEBIT'; }
+            else if (creditAmt > 0) { amount = creditAmt; direction = 'CREDIT'; }
+        }
+        
+        if (amount === 0) continue;
+        
+        const dateRes = resolveTransactionDate(dateRaw, typeHint, lastDate, null);
+        if (dateRes.date) lastDate = dateRes.date;
+        
+        const descRes = resolveDescription(descRaw, typeHint);
+        
+        if (dateRes.metadata.level === 'LEVEL_1_ROW') dateStats.level1_Explicit++;
+        else dateStats.level4_Missing++;
+        amountStats.level1_Explicit++;
+        descStats.total++;
+        if (descRes.metadata.merchantName) descStats.merchantIdentified++;
+        
+        const isDraft = !dateRes.date || !descRes.description;
+        const issues: string[] = [];
+        if (dateRes.metadata.issue) issues.push(dateRes.metadata.issue);
+        
+        txns.push(createTxn({
+            instrumentId,
+            txnDate: dateRes.date,
+            dateMetadata: dateRes.metadata,
+            description: descRes.description,
+            descriptionRaw: descRaw,
+            descriptionMetadata: descRes.metadata,
+            amount,
+            amountMetadata: { level: 'LEVEL_1_EXPLICIT', confidence: 'HIGH', source: 'COLUMN', issue: null },
+            direction,
+            counterpartyNameGuess: descRes.metadata.merchantName,
+            status: isDraft ? 'draft' : 'draft', // All generic CSV starts as draft
+            needsAttention: isDraft,
+            issues,
+            parserId: 'csv_generic_v1',
+            rawRow: row
+        }));
+    }
+    
+    const report = createReport('CSV', 'GenericCsvV1', txns.length, ['GenericHeaderDetected']);
+    report.dateStats = dateStats;
+    report.amountStats = amountStats;
+    report.descriptionStats = descStats;
+    
+    return {
+        docMeta: { extractedInstitutionName: null },
+        txns,
+        warnings,
+        parseReport: report
+    };
+};
+
 // --- GENERIC DISPATCHER ---
 
 export const parseFileUniversal = async (
@@ -722,17 +981,10 @@ export const parseFileUniversal = async (
             case 'gemini_vision_v1': return await parseGeminiVisionV1(file, instrumentId);
             
             case 'pdf_text_v1': 
-                // Legacy PDF Text wrapper
-                const ab = await file.arrayBuffer();
-                return { 
-                    docMeta: { extractedInstitutionName: null }, 
-                    txns: [], 
-                    warnings: ['LEGACY_PDF_NOT_IMPL'], 
-                    parseReport: createReport('PDF_TEXT', 'Legacy', 0)
-                };
+                return await parsePdfTextV1(file, instrumentId);
             
             case 'csv_generic_v1':
-                 return await parseIciciCcCsvV2(file, instrumentId); 
+                 return await parseGenericCsvV1(file, instrumentId); 
 
             default:
                 throw new Error(`Parser ${parserId} not implemented`);

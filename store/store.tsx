@@ -7,6 +7,7 @@ import { getMonthFromDate, getFinancialYear, validateTransaction, generateId, ge
 import { buildRegistries } from '../services/analysis';
 import { classifyTransactionNature } from '../services/natureClassifier';
 import { computeDeterministicSuggestionV1 } from '../services/categoryClassifier';
+import { runDeduplication } from '../services/deduplication';
 
 // --- Initial State ---
 const createInitialState = (): AppState => {
@@ -62,7 +63,7 @@ const createInitialState = (): AppState => {
               search: "",
               showDrafts: true,
               showExcluded: false,
-              includeDraftsInAnalytics: false
+              includeDraftsInAnalytics: true
           }, 
           drilldown: null,
           selectedTxnId: null, 
@@ -78,7 +79,8 @@ const createInitialState = (): AppState => {
 
 // --- Reducer ---
 const reducer = (state: AppState, action: Action): AppState => {
-  const newState = { ...state };
+  // Deep clone to prevent mutation of nested objects
+  const newState = JSON.parse(JSON.stringify(state)) as AppState;
   
   newState.runtime.lastEventAt = Date.now();
   if (action.type.includes('FAIL') || action.type.includes('ERROR')) {
@@ -223,6 +225,19 @@ const reducer = (state: AppState, action: Action): AppState => {
         });
         
         doc.parseStatus = newTxns.length > 0 ? (newTxns.every(t => !t.needsAttention) ? 'parsed' : 'partial') : 'manual';
+        
+        // Run deduplication on all transactions
+        try {
+            const allTxns = newState.transactions.allIds.map(id => newState.transactions.byId[id]).filter(Boolean);
+            const { updatedTransactions, summary } = runDeduplication(allTxns);
+            updatedTransactions.forEach(t => { newState.transactions.byId[t.id] = t; });
+            if (summary.duplicates_marked > 0) {
+                newState.ui.toasts.push({ id: generateId(), level: 'info', message: `Dedup: ${summary.duplicates_marked} duplicates detected`, createdAt: Date.now() });
+            }
+        } catch (e) {
+            console.warn('Dedup failed', e);
+        }
+        
         newState.ledger.lastComputedAt = Date.now();
         return newState;
     }
@@ -459,9 +474,12 @@ export const StoreProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   const [state, dispatch] = useReducer(reducer, createInitialState());
 
   useEffect(() => {
-    const loaded = StorageService.loadState();
-    if (loaded) { dispatch({ type: 'APP/HYDRATE_SUCCESS', payload: { state: loaded } }); } 
-    else { dispatch({ type: 'APP/HYDRATE_START' }); }
+    StorageService.loadState().then(loaded => {
+      if (loaded) { dispatch({ type: 'APP/HYDRATE_SUCCESS', payload: { state: loaded } }); } 
+      else { dispatch({ type: 'APP/HYDRATE_START' }); }
+    }).catch(() => {
+      dispatch({ type: 'APP/HYDRATE_START' });
+    });
   }, []);
 
   useEffect(() => {
