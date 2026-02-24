@@ -27,7 +27,7 @@ export const getGeminiApiKey = (): string | null => {
 };
 export const clearGeminiApiKey = () => { _runtimeApiKey = null; };
 
-const GEMINI_MODEL = 'gemini-2.5-flash-preview-05-20';
+const GEMINI_MODEL = 'gemini-1.5-flash';
 
 const getAIClient = () => {
   const key = getGeminiApiKey();
