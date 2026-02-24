@@ -27,7 +27,7 @@ export const getGeminiApiKey = (): string | null => {
 };
 export const clearGeminiApiKey = () => { _runtimeApiKey = null; };
 
-const GEMINI_MODEL = 'gemini-1.5-flash-latest';
+const GEMINI_MODEL = 'gemini-2.5-flash-preview-04-17';
 
 const getAIClient = () => {
   const key = getGeminiApiKey();
@@ -833,15 +833,7 @@ Return structured JSON with all transactions found.`;
 
     const response = await ai.models.generateContent({
       model: GEMINI_MODEL,
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            { inlineData: { mimeType, data: base64Data } },
-            { text: prompt }
-          ]
-        }
-      ],
+      contents: { parts: [{ inlineData: { mimeType, data: base64Data } }, { text: prompt }] },
       config: { responseMimeType: "application/json", responseSchema: responseSchema },
     });
 
