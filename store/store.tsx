@@ -100,6 +100,13 @@ const reducer = (state: AppState, action: Action): AppState => {
         newState.meta.hydrateError = action.payload.error;
         return newState;
 
+    case 'APP/HYDRATE_START':
+        // Fresh user (no saved IDB state) or hydrate-load failure: mark ready so
+        // autosave (gated on hydrateStatus === 'ready') can persist subsequent edits.
+        newState.meta.hydrateStatus = 'ready';
+        newState.meta.hydrateError = null;
+        return newState;
+
     case 'CONTEXT/SET_MONTH':
         newState.context.selectedMonth = action.payload.month;
         newState.context.selectedFY = getFinancialYear(action.payload.month + "-01") || newState.context.selectedFY;
